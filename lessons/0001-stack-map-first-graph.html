@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0001 — The stack in one map + your first graph</title>
+<style>
+  body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.65;color:#1a1a1a}
+  h1{font-size:1.6rem}h2{margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+  code{background:#f1f1f1;padding:.1rem .35rem;border-radius:4px;font-size:.9em}
+  pre{background:#111;color:#eee;padding:1rem;border-radius:8px;overflow-x:auto;font-size:.85rem}
+  .win{background:#eef7ee;border:1px solid #9ccc9c;padding:.8rem 1rem;border-radius:8px}
+  .def{background:#f6f8ff;border:1px solid #b9c8f0;padding:.7rem 1rem;border-radius:8px;margin:.6rem 0}
+  .step{background:#fafafa;border-left:4px solid #333;padding:.6rem 1rem;margin:.6rem 0}
+  .quiz button{display:block;margin:.4rem 0;padding:.6rem 1rem;width:100%;text-align:left;font-size:1rem;cursor:pointer;border:1px solid #ccc;border-radius:8px;background:#fff}
+  .quiz button.correct{background:#d8f0d8;border-color:#2e7d32}
+  .quiz button.wrong{background:#fbdcdc;border-color:#c62828}
+  #score{font-weight:bold}
+  .cite{font-size:.85rem;color:#555}
+</style></head><body>
+<h1>Lesson 0001 — The stack in one map + your first graph</h1>
+<p><strong>One thing:</strong> say which layer owns your problem, then run a graph with no API key. ~20 min. No prior LangChain knowledge assumed; plain Python is enough.</p>
+
+<h2>1. The map: three layers, each in plain English</h2>
+<p>An <strong>agent</strong> is just a program that calls a model, uses the result (often by calling a <strong>tool</strong> — a plain Python function the model is allowed to invoke, e.g. "look up the weather"), and repeats until done. That repeat-until-done cycle is the <strong>loop</strong>. The three layers split two jobs: <strong>who defines the loop</strong> vs <strong>who runs it reliably</strong>.</p>
+<div class="def"><strong>LangChain — the framework.</strong> Ready-made pieces: connections to models (OpenAI, Anthropic, …), ready-made tools, and <code>create_agent</code> — a pre-built loop (model → tool → model → …) you can use without designing anything. Note its limits: the standard loop only — no bundled planning step, no subagents, no filesystem. Use it when that standard loop is all you need. <span class="cite">[<a href="https://docs.langchain.com/oss/python/langchain/agents">LangChain agents</a>]</span></div>
+<div class="def"><strong>LangGraph — the runtime.</strong> Lets you design <em>your own</em> loop as a graph of steps, and runs it reliably: it can pause for human approval, save progress so a crash resumes where it stopped (<strong>checkpointing</strong>), and stream intermediate results. The price: you hand-build the wiring yourself. Use it when the <em>shape</em> of the loop is itself your spec — branches, approvals, multiple actors, long runs. <span class="cite">[<a href="https://docs.langchain.com/oss/python/langgraph/overview">LangGraph overview</a>]</span></div>
+<div class="def"><strong>Deep Agents — the opinionated harness.</strong> A ready-made <em>long-horizon</em> agent built on the other two: it plans, delegates to helper agents (<strong>subagents</strong> — agents with their own isolated context, so the main one doesn't drown in detail), reads/writes files, and summarizes long histories. Use it for research/coding tasks where you want all that bundled. <span class="cite">[<a href="https://github.com/langchain-ai/deepagents/blob/main/README.md">Deep Agents README</a>]</span></div>
+<p>(A fourth name you'll see, <strong>LangSmith</strong>, is the observability platform — tracing, evaluation, deployment. It watches your agent run; it doesn't define or execute the loop. Full story in a later lesson.)</p>
+<p>Memory hook: <strong>the harness owns the loop, the runtime owns the execution.</strong> Standard loop → take a harness. Custom loop shape → drop to the runtime. (They compose: any finished graph can be plugged in as a Deep Agent subagent — later lesson.)</p>
+<p>Full cheat sheet: <a href="../reference/stack-map.html">reference/stack-map.html</a></p>
+
+<h2>2. Five words before any code</h2>
+<p>A LangGraph program has exactly five moving parts. Read these slowly — every line of code below is one of them:</p>
+<div class="def"><strong>1. State</strong> — a shared dictionary every step can read and update. Think of it as the notepad passed around the team. <code>MessagesState</code> is a ready-made notepad whose only page is <code>"messages"</code>, a list of chat messages.</div>
+<div class="def"><strong>2. Node</strong> — one step of work: a plain Python function <code>fn(state) → update</code>. It reads the notepad and returns <em>only what's new</em>; LangGraph merges it in.</div>
+<div class="def"><strong>3. Edge</strong> — wiring: "after X, run Y". <code>START</code> and <code>END</code> are fake markers meaning "the beginning" and "finished", so <code>add_edge(START, "llm")</code> reads as "first, run the llm step".</div>
+<div class="def"><strong>4. compile()</strong> — freezes your wiring into a runnable app. Before compiling you have a <em>drawing</em> of the workflow; after, an executable.</div>
+<div class="def"><strong>5. invoke()</strong> — runs the app once: you hand it the starting state, it walks the wiring to <code>END</code>, and hands back the final notepad.</div>
+
+<h2>3. Build it, line by line (explicit steps)</h2>
+<p>Do exactly this. The "LLM" is a stub returning a fixed string, so no API key is needed — you're learning the <em>shape</em> first, real models in lesson 2.</p>
+<div class="step"><strong>Step 1.</strong> Open a terminal and go to the repo root (this folder, the one containing <code>.venv</code>). Confirm with <code>ls .venv</code> — you should see <code>bin</code> listed. All commands below run from there.</div>
+<div class="step"><strong>Step 2.</strong> Copy-paste this whole block into your terminal and press enter. Expected output on the last line: <code>hello world</code>.
+<pre>.venv/bin/python -c "
+from langgraph.graph import StateGraph, MessagesState, START, END
+def mock_llm(state: MessagesState):
+    return {'messages': [{'role': 'ai', 'content': 'hello world'}]}
+g = StateGraph(MessagesState)
+g.add_node('llm', mock_llm)
+g.add_edge(START, 'llm')
+g.add_edge('llm', END)
+out = g.compile().invoke({'messages': [{'role': 'user', 'content': 'hi'}]})
+print(out['messages'][-1].content)
+"
+# expect: hello world</pre></div>
+<div class="step"><strong>Step 3.</strong> If you see <code>hello world</code>, it worked. If you see <code>No such file or directory: .venv/bin/python</code>, you're in the wrong folder — <code>cd</code> to the repo root and retry. Any other error: paste it to me and we'll debug together.</div>
+<p>Now map each line back to the five words:</p>
+<ul>
+<li><code>StateGraph(MessagesState)</code> — "my notepad is a message list."</li>
+<li><code>def mock_llm(state): return {'messages': [...]}</code> — a <strong>node</strong>: reads the notepad (ignores it here), returns one new AI message. Note it returns <em>only the update</em>, not the whole state.</li>
+<li><code>add_node('llm', mock_llm)</code> — registers the function under the name <code>"llm"</code> so edges can point at it.</li>
+<li><code>add_edge(START, 'llm')</code> / <code>add_edge('llm', END)</code> — the full wiring: begin → llm → finished.</li>
+<li><code>compile()</code> — drawing becomes executable. <code>invoke({...})</code> — run once with a starting user message; <code>out</code> is the final notepad, and <code>out['messages'][-1]</code> is our AI message.</li>
+</ul>
+<div class="win"><strong>Tangible win:</strong> you can now narrate what each of the five lines does. That five-step shape — state → node → edge → compile → invoke — is every LangGraph program you'll ever write.</div>
+
+<h2>4. Write it yourself (the exercise)</h2>
+<p>Same program, but <em>you</em> fill the gaps. Open <code>exercises/0001-stack-map-first-graph.py</code> in your editor, complete the 4 TODOs in order (each has a hint; TODO 1 is just the import), and re-run until all green:</p>
+<pre>.venv/bin/python exercises/0001-stack-map-first-graph.py</pre>
+<p>The script tells you immediately what passes and what fails — a red <code>FAIL</code> line names the exact TODO to revisit. All green means the lesson is locked in.</p>
+
+<h2>5. Check yourself (3 min)</h2>
+<div class="quiz" id="q1">
+<p><strong>Q1.</strong> Long-horizon research task, want planning + subagents + filesystem out of the box. Which?</p>
+<button data-ok="0">LangChain <code>create_agent</code> (standard loop, no bundled filesystem/subagents)</button>
+<button data-ok="0">Raw <code>StateGraph</code> (you'd hand-build everything)</button>
+<button data-ok="1">Deep Agents <code>create_deep_agent</code></button>
+<p id="f1"></p>
+</div>
+<div class="quiz" id="q2">
+<p><strong>Q2.</strong> Agent must pause for human approval before any shell command. Who owns that?</p>
+<button data-ok="1">LangGraph runtime (interrupts / checkpoints pause execution)</button>
+<button data-ok="0">The model prompt alone ("please ask first")</button>
+<button data-ok="0">The LangSmith dashboard alone (it only observes)</button>
+<p id="f2"></p>
+</div>
+<div class="quiz" id="q3">
+<p><strong>Q3.</strong> What does <code>g.compile()</code> give you?</p>
+<button data-ok="0">A model API key</button>
+<button data-ok="1">A runnable app from your wiring (invokable, streamable)</button>
+<button data-ok="0">A deployed URL</button>
+<p id="f3"></p>
+</div>
+<p id="score"></p>
+
+<h2>6. Next</h2>
+<p>Lesson 0002: swap the stub for a real tool-loop with <code>create_agent</code> + one bounded tool (this is where your API key finally gets used). Stuck on anything above? Ask me — I'm your teacher, paste your error or confusion and we'll debug it.</p>
+
+<script>
+let s=0,done={};
+document.querySelectorAll('.quiz').forEach((q,i)=>{
+  q.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const ok=b.dataset.ok==='1',n=i+1,f=document.getElementById('f'+n);
+    if(q.dataset.hit)return;
+    if(ok){b.classList.add('correct');f.textContent=['✔ Planning+subagents+filesystem bundled = the opinionated harness.','✔ Approvals pause execution → interrupts/checkpoints, not wishes in a prompt. LangSmith only observes.','✔ compile() turns the wiring drawing into something you can invoke/stream.'][i];q.dataset.hit=1;s++;}
+    else{b.classList.add('wrong');f.textContent='Not quite — try again.';}
+    document.getElementById('score').textContent='Score: '+s+' / 3';
+  });
+});
+</script>
+</body></html>

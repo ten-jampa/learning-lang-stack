@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0002 — Your first tool-loop with create_agent</title>
+<style>
+  body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.65;color:#1a1a1a}
+  h1{font-size:1.6rem}h2{margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+  code{background:#f1f1f1;padding:.1rem .35rem;border-radius:4px;font-size:.9em}
+  pre{background:#111;color:#eee;padding:1rem;border-radius:8px;overflow-x:auto;font-size:.85rem}
+  .win{background:#eef7ee;border:1px solid #9ccc9c;padding:.8rem 1rem;border-radius:8px}
+  .def{background:#f6f8ff;border:1px solid #b9c8f0;padding:.7rem 1rem;border-radius:8px;margin:.6rem 0}
+  .step{background:#fafafa;border-left:4px solid #333;padding:.6rem 1rem;margin:.6rem 0}
+  .quiz button{display:block;margin:.4rem 0;padding:.6rem 1rem;width:100%;text-align:left;font-size:1rem;cursor:pointer;border:1px solid #ccc;border-radius:8px;background:#fff}
+  .quiz button.correct{background:#d8f0d8;border-color:#2e7d32}
+  .quiz button.wrong{background:#fbdcdc;border-color:#c62828}
+  #score{font-weight:bold}
+  .cite{font-size:.85rem;color:#555}
+</style></head><body>
+<h1>Lesson 0002 — Your first tool-loop with <code>create_agent</code></h1>
+<p><strong>One thing:</strong> give an agent exactly one ability (a weather tool) and watch the model → tool → model loop run. ~20 min. Needs the API key you put in <code>.env</code> (lesson 1 needed none; from here on, real model calls). Assumes lesson 1's five words (state, node, edge, compile, invoke).</p>
+
+<h2>1. Four new words, then code</h2>
+<div class="def"><strong>1. Tool</strong> — a plain Python function the agent is allowed to call, e.g. <code>get_weather(city)</code>. The function's <strong>docstring is the tool's user manual</strong>: it's what the model reads to decide <em>when</em> to call it and what arguments to pass. No docstring = the model is guessing blind.</div>
+<div class="def"><strong>2. Tool call</strong> — the model's structured request: "call <code>get_weather</code> with <code>city='sf'</code>". Crucial detail: <strong>the model never runs your function</strong>. It only <em>asks</em>; the harness executes the function locally and pastes the result back into the conversation.</div>
+<div class="def"><strong>3. The loop</strong> — <code>create_agent</code>'s whole job: send messages to the model → if the model requests a tool call, run it and append the result → repeat until the model answers directly. You never write this loop; the harness owns it (lesson 1's hook).</div>
+<div class="def"><strong>4. System prompt</strong> — standing instructions prepended to every run ("You are a helpful assistant"). It shapes behavior; it does <em>not</em> grant abilities — only <code>tools=[...]</code> does that.</div>
+<p>The punchline for your mission: <strong>an agent's tools are its boundary.</strong> Whatever isn't in <code>tools=[...]</code>, the agent cannot touch — files, shell, network, nothing. Scoping a spec starts with scoping that list. <span class="cite">[<a href="https://docs.langchain.com/oss/python/langchain/agents">LangChain agents</a>]</span></p>
+
+<h2>2. Build it, line by line</h2>
+<div class="step"><strong>Step 1.</strong> Terminal, repo root (folder containing <code>.venv</code> and <code>.env</code>). Confirm keys load: <code>.venv/bin/python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(bool(os.getenv('ANTHROPIC_API_KEY')))"</code> → expect <code>True</code>. If <code>False</code>, your <code>.env</code> is missing or malformed — fix that first.</div>
+<div class="step"><strong>Step 2.</strong> Paste this block. One real model call on <code>claude-haiku-5-5</code> (our fast/cheap default — fractions of a cent), ~10–30 s:
+<pre>.venv/bin/python -c "
+from dotenv import load_dotenv
+load_dotenv()
+from langchain.agents import create_agent
+def get_weather(city: str) -> str:
+    '''Get weather for a given city.'''
+    return f\"It's always sunny in {city}!\"
+agent = create_agent(
+    model='claude-haiku-5-5',
+    tools=[get_weather],
+    system_prompt='You are a helpful assistant',
+)
+out = agent.invoke({'messages': [{'role': 'user', 'content': 'what is the weather in sf'}]})
+print(out['messages'][-1].content)
+"
+# expect: a sunny-San-Francisco answer in the model's own words</pre></div>
+<div class="step"><strong>Step 3.</strong> Errors? <code>AuthenticationError</code> → key wrong/missing in <code>.env</code>. <code>ModuleNotFoundError</code> → wrong folder or venv. Anything else → paste it to me. (OpenAI instead? Swap the model string to <code>'gpt-4o'</code> — same shape, different provider.)</div>
+<p>Map each line back to the four words:</p>
+<ul>
+<li><code>def get_weather...</code> — the <strong>tool</strong>. The logic is a stub (always sunny) so you can see the <em>loop</em> without depending on a real API. The docstring is its manual.</li>
+<li><code>create_agent(model=..., tools=[get_weather], system_prompt=...)</code> — "here's the model, here's the <em>one thing it's allowed to touch</em>, here's its standing instructions." Returns a compiled, runnable app — yes, the same <code>CompiledStateGraph</code> species as lesson 1. The harness <em>is</em> a graph under the hood.</li>
+<li><code>invoke({'messages': [...]})</code> — identical shape to lesson 1: starting notepad in, final notepad out. Inside, the loop ran: model asked for <code>get_weather('sf')</code> → harness ran your function → model turned <code>"It's always sunny in sf!"</code> into a friendly answer.</li>
+</ul>
+<div class="win"><strong>Tangible win:</strong> you scoped an agent's entire boundary in one list (<code>tools=[...]</code>) and ran a real model through the loop. Everything from here — more tools, memory, approvals — is elaboration on this shape.</div>
+
+<h2>3. Write it yourself</h2>
+<p>Same agent, your keystrokes. Complete the TODOs in <code>exercises/0002-first-tool-loop.py</code>, re-run until green (this one needs your key + network for the final check):</p>
+<pre>.venv/bin/python exercises/0002-first-tool-loop.py</pre>
+
+<h2>4. Check yourself</h2>
+<div class="quiz" id="q1">
+<p><strong>Q1.</strong> How does the model learn what <code>get_weather</code> does and when to call it?</p>
+<button data-ok="1">From the function's docstring</button>
+<button data-ok="0">From the function name alone</button>
+<button data-ok="0">From the system prompt alone</button>
+<p id="f1"></p>
+</div>
+<div class="quiz" id="q2">
+<p><strong>Q2.</strong> When the model decides to use the tool, who actually executes <code>get_weather</code>?</p>
+<button data-ok="0">The model, on its own servers</button>
+<button data-ok="1">The harness, locally — the model only sends the request</button>
+<button data-ok="0">LangSmith, as part of tracing</button>
+<p id="f2"></p>
+</div>
+<div class="quiz" id="q3">
+<p><strong>Q3.</strong> Your spec says the agent must never touch the filesystem. Where is that enforced?</p>
+<button data-ok="0">In the system prompt ("never touch files")</button>
+<button data-ok="1">In <code>tools=[...]</code> — no file tool listed, no file access possible</button>
+<button data-ok="0">In LangSmith's dashboard settings</button>
+<p id="f3"></p>
+</div>
+<p id="score"></p>
+
+<h2>5. Next</h2>
+<p>Lesson 0003: two tools + a second boundary — a read-only vs write-capable split, so "different specs and boundaries" gets concrete. Stuck anywhere? Paste the error or confusion and we'll debug it.</p>
+
+<script>
+let s=0;
+document.querySelectorAll('.quiz').forEach((q,i)=>{
+  q.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const ok=b.dataset.ok==='1',n=i+1,f=document.getElementById('f'+n);
+    if(q.dataset.hit)return;
+    if(ok){b.classList.add('correct');f.textContent=['✔ The docstring is the tool manual — the harness shows it to the model. Names and prompts don\'t describe arguments.','✔ Models can\'t run your code; the harness executes locally and pastes the result back. (LangSmith only observes — lesson 1.)','✔ Abilities come only from tools=[...]. Prompts shape style; they don\'t grant or remove powers.'][i];q.dataset.hit=1;s++;}
+    else{b.classList.add('wrong');f.textContent='Not quite — try again.';}
+    document.getElementById('score').textContent='Score: '+s+' / 3';
+  });
+});
+</script>
+</body></html>

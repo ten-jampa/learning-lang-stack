@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack Map — LangChain / LangGraph / Deep Agents</title>
+<style>
+  body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.55;color:#1a1a1a}
+  table{border-collapse:collapse;width:100%;margin:1rem 0}th,td{border:1px solid #ccc;padding:.5rem;text-align:left;font-size:.92rem}
+  th{background:#f4f4f4}code{background:#f4f4f4;padding:.1rem .35rem;border-radius:4px;font-size:.88em}
+  pre{background:#111;color:#eee;padding:1rem;border-radius:8px;overflow-x:auto;font-size:.85rem}
+  @media print{body{max-width:100%}}
+</style></head><body>
+<h1>Stack Map cheat sheet</h1>
+<p>One rule: <strong>harness</strong> = owns the model loop; <strong>runtime</strong> = owns execution. Everything else follows.</p>
+<table>
+<tr><th>Layer</th><th>What it is</th><th>Reach for it when…</th></tr>
+<tr><td><strong>LangChain</strong><br>framework</td><td>Models, tools, <code>create_agent</code> (proven ReAct loop), middleware</td><td>You want a tool-calling agent in minutes; loop shape is standard</td></tr>
+<tr><td><strong>LangGraph</strong><br>runtime</td><td><code>StateGraph</code>: state + nodes + edges; durable execution, streaming, checkpoints, interrupts</td><td>Loop shape is custom (branches, multi-actor, approvals, long runs)</td></tr>
+<tr><td><strong>Deep Agents</strong><br>harness</td><td>Opinionated agent on <code>create_agent</code>: planning, subagents, filesystem, context mgmt, skills, HITL</td><td>Long-horizon work (research/coding) where you want batteries included</td></tr>
+<tr><td><strong>LangSmith</strong><br>platform</td><td>Tracing, evals, deploy, Studio</td><td>Agent works locally; now debug/eval/ship it</td></tr>
+</table>
+<h2>Decision in 10 seconds</h2>
+<ol>
+<li>Standard tool loop? → <code>create_agent</code> (LangChain).</li>
+<li>Need planning + subagents + files out of the box? → <code>create_deep_agent</code>.</li>
+<li>Need a different loop shape / hard boundaries? → <code>StateGraph</code> (LangGraph).</li>
+<li>Any <code>CompiledStateGraph</code> can be a Deep Agent <strong>subagent</strong> — layers compose.</li>
+</ol>
+<h2>Minimal shapes (from memory)</h2>
+<pre># LangGraph: state → node → edge → compile → invoke
+from langgraph.graph import StateGraph, MessagesState, START, END
+g = StateGraph(MessagesState)
+g.add_node("llm", fn)          # fn(state) -&gt; {"messages": [...]}
+g.add_edge(START, "llm")
+g.add_edge("llm", END)
+app = g.compile()
+app.invoke({"messages": [{"role": "user", "content": "hi"}]})
+
+# LangChain: harness owns the loop
+from langchain.agents import create_agent
+agent = create_agent(model="claude-sonnet-4-5-20250929",
+    tools=[get_weather], system_prompt="You are a helpful assistant")
+
+# Deep Agents: harness + batteries
+from deepagents import create_deep_agent
+agent = create_deep_agent(tools=[...])  # planning, subagents, fs included</pre>
+<p>Sources: <a href="https://docs.langchain.com/oss/python/langgraph/overview">LangGraph overview</a> · <a href="https://docs.langchain.com/oss/python/langchain/agents">LangChain agents</a> · <a href="https://github.com/langchain-ai/deepagents/blob/main/README.md">Deep Agents README</a></p>
+</body></html>
