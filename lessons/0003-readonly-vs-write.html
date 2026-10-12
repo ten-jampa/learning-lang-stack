@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 0003 — Boundaries: read-only vs write tools</title>
+<style>
+  body{font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;line-height:1.65;color:#1a1a1a}
+  h1{font-size:1.6rem}h2{margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+  code{background:#f1f1f1;padding:.1rem .35rem;border-radius:4px;font-size:.9em}
+  pre{background:#111;color:#eee;padding:1rem;border-radius:8px;overflow-x:auto;font-size:.85rem}
+  .win{background:#eef7ee;border:1px solid #9ccc9c;padding:.8rem 1rem;border-radius:8px}
+  .def{background:#f6f8ff;border:1px solid #b9c8f0;padding:.7rem 1rem;border-radius:8px;margin:.6rem 0}
+  .step{background:#fafafa;border-left:4px solid #333;padding:.6rem 1rem;margin:.6rem 0}
+  .quiz button{display:block;margin:.4rem 0;padding:.6rem 1rem;width:100%;text-align:left;font-size:1rem;cursor:pointer;border:1px solid #ccc;border-radius:8px;background:#fff}
+  .quiz button.correct{background:#d8f0d8;border-color:#2e7d32}
+  .quiz button.wrong{background:#fbdcdc;border-color:#c62828}
+  #score{font-weight:bold}
+  .cite{font-size:.85rem;color:#555}
+</style></head><body>
+<h1>Lesson 0003 — Boundaries: read-only vs write tools</h1>
+<p><strong>One thing:</strong> prove that an agent's powers equal its tool list — by building two agents that differ in exactly one tool and watching one succeed where the other refuses. ~20 min. Needs <code>.env</code> key. Assumes lessons 1–2.</p>
+
+<h2>1. Three new words, then code</h2>
+<div class="def"><strong>1. Read tool vs write tool</strong> — a read tool only <em>looks</em> (<code>get_order</code> returns a record, world unchanged). A write tool <em>changes</em> something outside the conversation (<code>issue_refund</code> appends to a ledger, sends an email, deletes a row). The code difference is nothing special — any function with side effects is a write tool. The <em>spec</em> difference is everything: write tools are the ones that need approvals, limits, and audits.</div>
+<div class="def"><strong>2. Routing</strong> — with two tools, the model picks which to call from their docstrings, each turn. You don't write if/else logic; the docstrings <em>are</em> the dispatch table. That's why lesson 2 insisted the docstring is the manual — now two manuals compete.</div>
+<div class="def"><strong>3. Boundary by absence</strong> — the agent from section 2 has no refund tool at all. When asked to refund, it has no tool call to make, so it answers in words (refusal + alternative). Nothing was "blocked" — the power was never granted. Enforcement by construction, not by instruction.</div>
+<p>One practical note before the code: a message's <code>content</code> is usually a plain string, but some models (including Haiku) sometimes return a <em>list of blocks</em> (thinking + text). The 4-line <code>text_of</code> helper below reads either form — defensive reading you'll reuse in every lesson from here on.</p>
+
+<h2>2. Build it, line by line</h2>
+<div class="step"><strong>Step 1.</strong> Terminal, repo root. Two real Haiku calls this lesson (still fractions of a cent total), ~30–60 s.</div>
+<div class="step"><strong>Step 2.</strong> Paste this block. Watch for the two contrasting endings:
+<pre>.venv/bin/python -c "
+from dotenv import load_dotenv
+load_dotenv()
+from langchain.agents import create_agent
+ORDERS = {'42': 'veg momos x2'}
+REFUNDS = []
+def get_order(order_id: str) -> str:
+    '''Look up an order by ID. Read-only.'''
+    return ORDERS.get(order_id, 'unknown order')
+def issue_refund(order_id: str) -> str:
+    '''Issue a refund for an order. WRITES state.'''
+    REFUNDS.append(order_id)
+    return f'refunded {order_id}'
+def text_of(msg):
+    c = msg.content
+    if isinstance(c, str):
+        return c
+    return chr(10).join(b.get('text', '') for b in c if isinstance(b, dict) and b.get('type') == 'text')
+full = create_agent(model='claude-haiku-5-5', tools=[get_order, issue_refund], system_prompt='You are a support assistant')
+readonly = create_agent(model='claude-haiku-5-5', tools=[get_order], system_prompt='You are a support assistant')
+r1 = full.invoke({'messages': [{'role': 'user', 'content': 'refund order 42'}]})
+print('FULL:', text_of(r1['messages'][-1])[:100])
+print('REFUNDS:', REFUNDS)
+r2 = readonly.invoke({'messages': [{'role': 'user', 'content': 'refund order 42'}]})
+print('READONLY:', text_of(r2['messages'][-1])[:200])
+"
+# expect: FULL refunds + REFUNDS ['42']; READONLY refuses, REFUNDS untouched by it</pre></div>
+<div class="step"><strong>Step 3.</strong> Errors? Same triage as lesson 2 (<code>AuthenticationError</code> → <code>.env</code>; <code>ModuleNotFoundError</code> → folder/venv). New possible surprise: the readonly agent <em>looks up</em> order 42 before refusing — that's routing working as designed (it used the one tool it has, then answered the rest in words).</div>
+<p>What just happened, mapped to the three words:</p>
+<ul>
+<li><code>REFUNDS</code> list = the "outside world". <code>issue_refund</code> mutates it → <strong>write tool</strong>. <code>get_order</code> only reads → <strong>read tool</strong>.</li>
+<li>The full agent <strong>routed</strong>: refund request → <code>issue_refund</code> docstring matched → tool call → <code>REFUNDS == ['42']</code>. Proof in data, not vibes.</li>
+<li>The readonly agent shows <strong>boundary by absence</strong>: no refund tool exists in its world, so no tool call was possible. Same prompt, same model, different list, different powers.</li>
+</ul>
+<div class="win"><strong>Tangible win:</strong> you can now scope "different specs and boundaries" for real: read-only support agent vs empowered one, differing by exactly one list entry. This is the mission's core skill in miniature.</div>
+
+<h2>3. Write it yourself</h2>
+<p>Same two agents, your keystrokes — including the refusal proof (<code>REFUNDS</code> stays empty for the readonly agent):</p>
+<pre>.venv/bin/python exercises/0003-readonly-vs-write.py</pre>
+
+<h2>4. Check yourself</h2>
+<div class="quiz" id="q1">
+<p><strong>Q1.</strong> The readonly agent is asked to refund order 42. What happens?</p>
+<button data-ok="1">It has no refund tool to call, so it answers in words (refusal + alternative)</button>
+<button data-ok="0">It refunds anyway — the prompt asked, so it finds a way</button>
+<button data-ok="0">It crashes with a permissions error</button>
+<p id="f1"></p>
+</div>
+<div class="quiz" id="q2">
+<p><strong>Q2.</strong> Tomorrow the spec changes: support may now refund. What's the grant?</p>
+<button data-ok="0">Rewrite the system prompt to allow refunds</button>
+<button data-ok="1">Add <code>issue_refund</code> to <code>tools=[...]</code></button>
+<button data-ok="0">Switch to a bigger model</button>
+<p id="f2"></p>
+</div>
+<div class="quiz" id="q3">
+<p><strong>Q3.</strong> With both tools listed, how does the model choose between them?</p>
+<button data-ok="0">The order they appear in the list — first match wins</button>
+<button data-ok="1">By reading both docstrings and picking the one that fits the request</button>
+<button data-ok="0">The harness calls both and keeps the better result</button>
+<p id="f3"></p>
+</div>
+<p id="score"></p>
+
+<h2>5. Next</h2>
+<p>Lesson 0004: memory — a checkpointer so the agent survives across runs (the mission's persistence criterion). Stuck anywhere? Paste the error or confusion and we'll debug it.</p>
+
+<script>
+let s=0;
+document.querySelectorAll('.quiz').forEach((q,i)=>{
+  q.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const ok=b.dataset.ok==='1',n=i+1,f=document.getElementById('f'+n);
+    if(q.dataset.hit)return;
+    if(ok){b.classList.add('correct');f.textContent=['✔ No tool = no tool call possible. It can only talk about refunding, never do it. Nothing crashes — refusal is just text.','✔ Powers come only from tools=[...] (lesson 2). Prompts shape style; models don\'t grant permissions.','✔ Docstrings are the dispatch table — that\'s why each one must say exactly what its tool does.'][i];q.dataset.hit=1;s++;}
+    else{b.classList.add('wrong');f.textContent='Not quite — try again.';}
+    document.getElementById('score').textContent='Score: '+s+' / 3';
+  });
+});
+</script>
+</body></html>
