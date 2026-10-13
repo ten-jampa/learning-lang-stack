@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from langchain.agents import create_agent
 _passed, _failed = 0, 0
 
 
@@ -39,12 +40,29 @@ REFUNDS = []
 # Both need docstrings (the model's manual).
 def get_order(order_id: str) -> str:
     # TODO: docstring + return ORDERS.get(order_id, "unknown order")
-    return ""  # <-- replace
+    """for a given order id, retreives the details of the order
+
+    Args:
+        order_id (str): _description_
+
+    Returns:
+        str: the details of the order if found, otherwise "unknown order"
+    """
+    return ORDERS.get(order_id, "unknown order")
 
 
 def issue_refund(order_id: str) -> str:
     # TODO: docstring + REFUNDS.append(order_id) + return f"refunded {order_id}"
-    return ""  # <-- replace
+    """for a given order with the given order id, issue refund
+
+    Args:
+        order_id (str): the id of the order to issue a refund for
+
+    Returns:
+        str: confirmation message that the refund has been issued
+    """
+    REFUNDS.append(order_id)
+    return f"refunded {order_id}"
 
 
 check("TODO1: read tool correct", get_order("42") == "veg momos x2" and get_order("7") == "unknown order")
@@ -56,7 +74,11 @@ REFUNDS.clear()
 
 # TODO 2: build the READ-ONLY agent (get_order only) on claude-haiku-5-5.
 # Hint: create_agent(model="claude-haiku-5-5", tools=[get_order], system_prompt="You are a support assistant")
-readonly = None  # TODO: replace (don't forget the import)
+readonly = create_agent(
+                        model="claude-haiku-5-5",
+                        tools=[get_order],
+                        system_prompt="You are a support assistant"
+                        )  # TODO: replace (don't forget the import)
 # --- your code here ---
 # ----------------------
 
@@ -77,7 +99,11 @@ else:
 
 # TODO 4: build the FULL agent (both tools) and ask it to refund order 42.
 # Prove the grant worked: REFUNDS must equal ["42"].
-full = None  # TODO: replace with create_agent carrying both tools
+full = create_agent(
+    model="claude-haiku-5-5",
+    tools=[get_order, issue_refund],
+    system_prompt="You are a support assistant"
+)  # TODO: replace with create_agent carrying both tools
 # --- your code here ---
 # ----------------------
 
